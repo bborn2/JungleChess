@@ -261,7 +261,7 @@ class JungleChess:
         # print("blue score = ", score)
         return score
 
-    def is_game_over(self):
+    def isGameOver(self):
         # 判断游戏是否结束
 
         blue = False
@@ -274,15 +274,15 @@ class JungleChess:
                 elif j > 10 and j < 100:
                     blue = True
 
-        if red == False or self.board[0][3] > 10:
+        if red == False or self.board[8][3] > 10:
             return -1000
-        elif self.board[8][3] > 10 or blue == False:
+        elif blue == False or self.board[0][3] > 10:
             return 1000
         else:
             return 0
 
     def minimax(self, depth, alpha, beta, maximizingPlayer):
-        if depth == 0 or self.is_game_over():
+        if depth == 0 or self.isGameOver():
             return self.evaluate()
         
         if maximizingPlayer:
@@ -312,7 +312,6 @@ class JungleChess:
         else:
             minEval = float('inf')
             
-
             for i in range(len(self.board)):
                 for j in range(len(self.board[i])):
                     if self.board[i][j] > 100:
@@ -335,7 +334,7 @@ class JungleChess:
                                     break
             return minEval
 
-    def get_best_move(self, depth):
+    def getBestMove(self, depth):
         best_move = None
         best_value = float('-inf')
 
@@ -343,8 +342,6 @@ class JungleChess:
             for j in range(len(self.board[i])):
                 if self.board[i][j] > 10 and self.board[i][j]< 100:
                     for move in self.get_legal_moves(i, j):              
-                        # if i == 2 and j == 0:
-                        #     print("----2,0 ",move)
                                                 
                         tempboard = copy.deepcopy(self.board)
                         tempmove = [i, j]
@@ -366,7 +363,7 @@ class JungleChess:
 
         return best_move
     
-    def get_human_input(self):
+    def getHumanInput(self):
         while True:
             number = input("Enter from row, from col, to row, to col:").replace(" ", "")
             inputs =  [int(digit) for digit in str(number)]
@@ -375,16 +372,16 @@ class JungleChess:
         
 # 使用示例
 game = JungleChess()
-while game.is_game_over() == 0:
+while game.isGameOver() == 0:
     move = None
 
     current_player = game.current_player
 
     if game.current_player == 1:
         print("ai thinking...")
-        move = game.get_best_move(depth=5)
+        move = game.getBestMove(depth=5)
     else:
-        move = game.get_human_input()  # 获取人类玩家的动作
+        move = game.getHumanInput()  # 获取人类玩家的动作
     
     game.current_player = current_player
 
@@ -396,7 +393,7 @@ while game.is_game_over() == 0:
         game.evaluate()
         game.current_player *= -1  # 切换玩家
 
-if game.is_game_over() == 1000:
-    print("ai win")
-else:
+if game.isGameOver() == 1000:
     print("you win")
+else:
+    print("ai win")

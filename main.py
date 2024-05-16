@@ -35,6 +35,16 @@ class JungleChess:
                 [0,400,0,2,0,300,0],
                 [800,0,2,4,2,0,700]]
 
+        # return [[0,0,2,3,2,30,0],
+        #         [0,20,700,2,0,0,0],
+        #         [0,0,0,40,0,0,0],
+        #         [0,1,1,0,1,1,0],
+        #         [0,1,1,0,1,1,0],
+        #         [0,1,1,0,1,1,0],
+        #         [0,0,0,0,0,0,0],
+        #         [0,0,0,2,0,0,0],
+        #         [0,0,2,4,2,0,0]]
+
     def get_legal_moves(self, row, col)->list:
         # 获取当前玩家的所有合法动作
         ret = []
@@ -279,6 +289,9 @@ class JungleChess:
         
 
         # print("blue score = ", score)
+
+        # if score < -10000:
+        #     self.showBoard()
         return score
 
     def isGameOver(self):
@@ -312,6 +325,9 @@ class JungleChess:
         return moves
     
     def minimax2(self, depth, alpha, beta, maximizing_player):
+
+        # print("depth = " , depth)
+
         if depth == 0 or self.isGameOver() != 0:
             return self.evaluate() + self.isGameOver(), None
         
@@ -434,6 +450,14 @@ class JungleChess:
             inputs =  [int(digit) for digit in str(number)]
             if len(inputs) == 4:
                 return inputs
+            
+    def get_blue_num(self):
+        ret = 0
+        for i in self.board:
+            for j in i:
+                if j > 10 and j < 100:
+                    ret += 1
+        return ret
         
 # 使用示例
 game = JungleChess()
@@ -445,7 +469,11 @@ while game.isGameOver() == 0:
     if game.current_player == 1:
         print("ai thinking...")
         # move = game.getBestMove(depth=5)
-        _, move = game.minimax2(6, float('-inf'), float('inf'), True)
+
+        if game.get_blue_num() > 4:
+            _, move = game.minimax2(6, float('-inf'), float('inf'), True)
+        else:
+            _, move = game.minimax2(10, float('-inf'), float('inf'), True)
     else:
         move = game.getHumanInput()  # 获取人类玩家的动作
     

@@ -7,7 +7,11 @@ class JungleChess:
         self.current_player = 1  # 1 for AI, -1 for human
 
         self.lastmove = [-1,-1,-1,-1]
+        self.piece_map = {0: "·", 1: "~", 2: "#", 3: "口", 4: "口", 
+                          20: "鼠", 30: "猫", 40: "狗", 50: "狼", 60: "豹", 70: "虎", 80: "狮", 90: "象"}
+
         self.showBoard()
+        
 
     def init_board(self):
         # 初始化棋盘，返回一个二维数组表示初始状态
@@ -199,10 +203,10 @@ class JungleChess:
             print("false 2")
             return False
         
-        if (self.current_player == 1 and not (10 < self.board[fromRow][fromCol] < 100)) or \
-            (self.current_player == -1 and not (100 < self.board[fromRow][fromCol])):
-            print("false 3")
-            return False
+        # if (self.current_player == 1 and not (10 < self.board[fromRow][fromCol] < 100)) or \
+        #     (self.current_player == -1 and not (100 < self.board[fromRow][fromCol])):
+        #     print("false 3")
+        #     return False
 
         if (toRow, toCol) not in self.get_legal_moves(fromRow, fromCol):
             print("false 4")
@@ -229,12 +233,26 @@ class JungleChess:
             s = str(i) + ":\t"
             for j in range(len(self.board[i])):
 
+                v = self.board[i][j]
+                if v > 10 and v < 100:
+                    v = v // 10 * 10
+                elif v > 100:
+                    v = v //100 * 10
+
+                t = self.piece_map[v]
+
+                if self.board[i][j] > 10 and self.board[i][j] < 100:
+                    t = "\033[34m" + t + "\033[0m"
+                elif self.board[i][j] > 100:
+                    t = "\033[31m" + t + "\033[0m"
+
+
                 if i == fromRow and j == fromCol:
-                    s += "\033[43m"+str(self.board[i][j])+"\033[0m"
+                    s += "\033[43m"+str(t)+"\033[0m"
                 elif i == toRow and j == toCol:
-                    s += "\033[42m"+str(self.board[i][j])+"\033[0m"
+                    s += "\033[47m"+str(t)+"\033[0m"
                 else:
-                    s += str(self.board[i][j])
+                    s += str(t)
                 s += "\t"
 
             print(s)
@@ -282,6 +300,58 @@ class JungleChess:
             return -10000
         else:
             return 0
+        
+    def get_all_legal_moves(self, player):
+        moves = []
+        for row in range(len(self.board)):
+            for col in range(len(self.board[0])):
+                piece = self.board[row][col]
+                if (player == 1 and 10 < piece < 100) or (player == -1 and 100 < piece):
+                    for move in self.get_legal_moves(row, col):
+                        moves.append([row, col, move[0], move[1]])
+        return moves
+    
+    def minimax2(self, depth, alpha, beta, maximizing_player):
+        if depth == 0 or self.isGameOver() != 0:
+            return self.evaluate() + self.isGameOver(), None
+        
+        best_move = None
+        
+        if maximizing_player:
+            max_eval = float('-inf')
+            for move in self.get_all_legal_moves(1):
+
+                tempboard = copy.deepcopy(self.board)
+                self.make_move(move)
+ 
+                evaluation, _ = self.minimax2(depth - 1, alpha, beta, False)
+                self.board = tempboard
+
+                if evaluation > max_eval:
+                    max_eval = evaluation
+                    best_move = move
+                alpha = max(alpha, evaluation)
+                if beta <= alpha:
+                    break
+            return max_eval, best_move
+        else:
+            min_eval = float('inf')
+            for move in self.get_all_legal_moves(-1):
+
+                tempboard = copy.deepcopy(self.board)
+                self.make_move(move)
+
+                evaluation, _ = self.minimax2(depth - 1, alpha, beta, True)
+                self.board = tempboard
+
+                if evaluation < min_eval:
+                    min_eval = evaluation
+                    best_move = move
+                beta = min(beta, evaluation)
+                if beta <= alpha:
+                    break
+            return min_eval, best_move
+        
 
     def minimax(self, depth, alpha, beta, maximizingPlayer):
         if depth == 0 or self.isGameOver() != 0:
@@ -374,7 +444,8 @@ while game.isGameOver() == 0:
 
     if game.current_player == 1:
         print("ai thinking...")
-        move = game.getBestMove(depth=5)
+        # move = game.getBestMove(depth=5)
+        _, move = game.minimax2(6, float('-inf'), float('inf'), True)
     else:
         move = game.getHumanInput()  # 获取人类玩家的动作
     

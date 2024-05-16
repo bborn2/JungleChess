@@ -185,34 +185,36 @@ class JungleChess:
         if self.current_player == 1:
             role = "ai"
 
-        fromRow = move[0]
-        fromCol = move[1]
-        toRow = move[2]
-        toCol = move[3]
+        fromRow, fromCol, toRow, toCol = move
 
         # print("## %s : %d,%d move to %d,%d"%(role, fromRow, fromCol, toRow, toCol))
+
+        if not (0 <= fromRow < len(self.board) and 0 <= fromCol < len(self.board[0]) and
+            0 <= toRow < len(self.board) and 0 <= toCol < len(self.board[0])):
+            print("false 1")
+            return False
 
         if fromRow >= len(self.board) or toRow >= len(self.board) or \
             fromCol >= len(self.board[0]) or toCol >= len(self.board[0]):
             print("false 2")
             return False
+        
+        if (self.current_player == 1 and not (10 < self.board[fromRow][fromCol] < 100)) or \
+            (self.current_player == -1 and not (100 < self.board[fromRow][fromCol])):
+            print("false 3")
+            return False
 
-        moves = self.get_legal_moves(fromRow, fromCol)
+        if (toRow, toCol) not in self.get_legal_moves(fromRow, fromCol):
+            print("false 4")
+            return False
 
-        if (self.current_player == 1 and self.board[fromRow][fromCol] > 10 and self.board[fromRow][fromCol] < 100) or\
-        (self.current_player == -1 and self.board[fromRow][fromCol] > 100):
-            if (toRow, toCol) in moves:
+        self.board[toRow][toCol] = self.board[fromRow][fromCol] // 10 * 10 +  self.board[toRow][toCol] % 10
+        self.board[fromRow][fromCol] = self.board[fromRow][fromCol] % 10
 
-                self.board[toRow][toCol] = self.board[fromRow][fromCol] // 10 * 10 +  self.board[toRow][toCol] % 10
-                self.board[fromRow][fromCol] = self.board[fromRow][fromCol] % 10
+        self.lastmove = move
 
-                self.lastmove = move
-
-                # print("true")
-                return True
-
-        print("false", move, moves) 
-        return False
+        # print("true")
+        return True
     
     def showBoard(self):
 
@@ -275,15 +277,15 @@ class JungleChess:
                     blue = True
 
         if red == False or self.board[8][3] > 10:
-            return -1000
+            return 10000
         elif blue == False or self.board[0][3] > 10:
-            return 1000
+            return -10000
         else:
             return 0
 
     def minimax(self, depth, alpha, beta, maximizingPlayer):
-        if depth == 0 or self.isGameOver():
-            return self.evaluate()
+        if depth == 0 or self.isGameOver() != 0:
+            return self.evaluate() + self.isGameOver()
         
         if maximizingPlayer:
             maxEval = float('-inf')
@@ -297,14 +299,11 @@ class JungleChess:
                             tempmove.extend(move)
                             self.current_player = 1
 
-                            b = self.make_move(tempmove)
-
-                            if b:
+                            if self.make_move(tempmove):
                                 eval = self.minimax(depth - 1, alpha, beta, False)
                                 maxEval = max(maxEval, eval)
                                 alpha = max(alpha, eval)
-
-                                self.board = copy.deepcopy(tempboard)
+                                self.board = tempboard # restore the board
 
                                 if beta <= alpha:
                                     break
@@ -317,18 +316,14 @@ class JungleChess:
                     if self.board[i][j] > 100:
                         for move in self.get_legal_moves(i, j):
                             tempboard = copy.deepcopy(self.board)
-                            tempmove = [i, j]
-                            tempmove.extend(move)
+                            tempmove = [i, j] + list(move)
                             self.current_player = -1
 
-                            b = self.make_move(tempmove)
-
-                            if b:
+                            if self.make_move(tempmove):
                                 eval = self.minimax(depth - 1, alpha, beta, True)
                                 minEval = min(minEval, eval)
                                 beta = min(beta, eval)
-
-                                self.board = copy.deepcopy(tempboard)
+                                self.board = tempboard # restore the board
 
                                 if beta <= alpha:
                                     break
@@ -393,7 +388,7 @@ while game.isGameOver() == 0:
         game.evaluate()
         game.current_player *= -1  # 切换玩家
 
-if game.isGameOver() == 1000:
+if game.isGameOver() == -10000:
     print("you win")
 else:
     print("ai win")

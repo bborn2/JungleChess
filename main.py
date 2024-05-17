@@ -25,25 +25,25 @@ class JungleChess:
         #  case Rat = 2
         #  蓝军 10-99，红军 100-999，地图 0-9，0是空地，1 是 river，2 是 trap，3是上方 den，4 是下方 den
 
-        return [[70,0,2,3,2,0,80],
-                [0,30,0,2,0,40,0],
-                [90,0,50,0,60,0,20],
-                [0,1,1,0,1,1,0],
-                [0,1,1,0,1,1,0],
-                [0,1,1,0,1,1,0],
-                [200,0,600,0,500,0,900],
-                [0,400,0,2,0,300,0],
-                [800,0,2,4,2,0,700]]
+        # return [[70,0,2,3,2,0,80],
+        #         [0,30,0,2,0,40,0],
+        #         [90,0,50,0,60,0,20],
+        #         [0,1,1,0,1,1,0],
+        #         [0,1,1,0,1,1,0],
+        #         [0,1,1,0,1,1,0],
+        #         [200,0,600,0,500,0,900],
+        #         [0,400,0,2,0,300,0],
+        #         [800,0,2,4,2,0,700]]
 
-        # return [[0,0,2,3,2,30,0],
-        #         [0,20,700,2,0,0,0],
-        #         [0,0,0,40,0,0,0],
-        #         [0,1,1,0,1,1,0],
-        #         [0,1,1,0,1,1,0],
-        #         [0,1,1,0,1,1,0],
-        #         [0,0,0,0,0,0,0],
-        #         [0,0,0,2,0,0,0],
-        #         [0,0,2,4,2,0,0]]
+        return [[0,0,2,3,2,30,0],
+                [0,20,700,2,0,0,0],
+                [0,0,0,40,0,0,0],
+                [0,1,1,0,1,1,0],
+                [0,1,1,0,1,1,0],
+                [0,1,1,0,1,1,0],
+                [0,0,0,0,0,0,0],
+                [0,0,0,2,0,0,0],
+                [0,0,2,4,2,0,0]]
 
     def get_legal_moves(self, row, col)->list:
         # 获取当前玩家的所有合法动作
@@ -198,6 +198,7 @@ class JungleChess:
 
         if len(move) != 4:
             print("false 1 " , role, move)
+            # assert False, "false 1"
             return False
 
         fromRow, fromCol, toRow, toCol = move
@@ -206,12 +207,16 @@ class JungleChess:
 
         if not (0 <= fromRow < len(self.board) and 0 <= fromCol < len(self.board[0]) and
             0 <= toRow < len(self.board) and 0 <= toCol < len(self.board[0])):
-            print("false 1")
+            print("false 2 ")
+            # assert False, "false 2"
+
+            self.showBoard()
             return False
 
         if fromRow >= len(self.board) or toRow >= len(self.board) or \
             fromCol >= len(self.board[0]) or toCol >= len(self.board[0]):
-            print("false 2")
+            print("false 3")
+            # assert False, "false 3"
             return False
         
         # if (self.current_player == 1 and not (10 < self.board[fromRow][fromCol] < 100)) or \
@@ -221,6 +226,7 @@ class JungleChess:
 
         if (toRow, toCol) not in self.get_legal_moves(fromRow, fromCol):
             print("false 4")
+            # assert False, "false 4"
             return False
 
         self.board[toRow][toCol] = self.board[fromRow][fromCol] // 10 * 10 +  self.board[toRow][toCol] % 10
@@ -270,30 +276,88 @@ class JungleChess:
         print("===============================================================")
 
 
+    # def evaluate(self):
+    #     # 评价给定状态
+    #     # 返回一个整数值表示状态的好坏
+    #     score = 0
+    #     for i in range(len(self.board)):
+    #         for j in range(len(self.board[i])):
+    #             if self.board[i][j] > 10 and self.board[i][j] < 100:
+    #                 score = score + (self.board[i][j] // 10) * (self.board[i][j] // 10) + i * 5
+
+    #                 if i == 8 and j == 3:
+    #                     score += 10000
+
+    #             elif self.board[i][j] > 100:
+    #                 score = score - (self.board[i][j] // 100) * (self.board[i][j] // 100) - (9-i)*5
+
+    #                 if i == 0 and j == 3:
+    #                     score -= 10000
+    
+    #     return score
+    
+    #计算蓝方的评分
     def evaluate(self):
         # 评价给定状态
         # 返回一个整数值表示状态的好坏
         score = 0
+        
+        # 定义棋子的价值（假设每种棋子都有一个固定的价值，可以根据实际情况调整）
+        piece_values = {
+            2: 100,   # 例如，鼠
+            3: 300,   # 例如，猫
+            4: 500,   # 例如，狼
+            5: 700,   # 例如，狗
+            6: 900,   # 例如，豹
+            7: 1100,  # 例如，虎
+            8: 1300,  # 例如，狮
+            9: 1500   # 例如，大象
+        }
+        
         for i in range(len(self.board)):
             for j in range(len(self.board[i])):
-                if self.board[i][j] > 10 and self.board[i][j] < 100:
-                    score = score + (self.board[i][j] // 10) * (self.board[i][j] // 10) + i * 5
-
-                    if i == 8 and j == 3:
+                piece = self.board[i][j]
+                
+                if piece > 10 and piece < 100:  # 蓝方棋子
+                    piece_type = piece // 10
+                    score += piece_values.get(piece_type, 0) + i * 10  # 更接近对方巢穴得分更高
+                    
+                    if i == 8 and j == 3:  # 占领巢穴位置，加 10000 分
                         score += 10000
 
-                elif self.board[i][j] > 100:
-                    score = score - (self.board[i][j] // 100) * (self.board[i][j] // 100) - (9-i)*5
-
-                    if i == 0 and j == 3:
+                elif piece > 100:  # 对方棋子
+                    piece_type = piece // 100
+                    score -= piece_values.get(piece_type, 0) + (8-i) * 10  # 更接近我方巢穴扣分更多
+                    
+                    if i == 0 and j == 3:  # 占领我方巢穴位置，输棋
                         score -= 10000
+    
+        # 计算控制区域得分（假设有一个函数可以返回当前棋子的控制区域）
+        # 控制区域指某个棋子可以移动到的所有位置，可以根据实际游戏规则实现这个功能
+        # for i in range(len(self.board)):
+        #     for j in range(len(self.board[i])):
+        #         piece = self.board[i][j]
+        #         if piece > 10 and piece < 100:  # 我方棋子
+        #             control_area = self.get_control_area(i, j)  # 获取当前棋子的控制区域
+        #             score += len(control_area) * 5  # 控制的区域越多得分越高
+        #         elif piece > 100:  # 对方棋子
+        #             control_area = self.get_control_area(i, j)
+        #             score -= len(control_area) * 5  # 对方控制的区域越多扣分越多
         
-
-        # print("blue score = ", score)
-
-        # if score < -10000:
-        #     self.showBoard()
         return score
+
+    def get_control_area(self, row, col):
+        # 这个函数应该返回棋子在(row, col)位置时可以控制的所有位置
+        # 根据具体的游戏规则实现这个功能
+        control_area = []
+        # 假设棋子可以上下左右移动，根据实际规则计算
+        directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        for direction in directions:
+            new_row, new_col = row + direction[0], col + direction[1]
+            if 0 <= new_row < 9 and 0 <= new_col < 7:  # 确保位置在棋盘内
+                control_area.append((new_row, new_col))
+        return control_area
+
 
     def isGameOver(self):
         # 判断游戏是否结束
@@ -309,9 +373,11 @@ class JungleChess:
                     blue = True
 
         if red == False or self.board[8][3] > 10:
-            return 10000
+            # red lose
+            return 1
         elif blue == False or self.board[0][3] > 10:
-            return -10000
+            # blue lose
+            return -1
         else:
             return 0
         
@@ -325,18 +391,20 @@ class JungleChess:
                         moves.append([row, col, move[0], move[1]])
         return moves
     
+    # act as red army
     def minimax2(self, depth, alpha, beta, maximizing_player):
 
         # print("depth = " , depth)
 
         if depth == 0 or self.isGameOver() != 0:
-            return self.evaluate() + self.isGameOver(), None
+            # return self.evaluate() + self.isGameOver(), None
+            return -self.evaluate(), None
         
         best_move = None
         
         if maximizing_player:
             max_eval = float('-inf')
-            for move in self.get_all_legal_moves(1):
+            for move in self.get_all_legal_moves(-1):
 
                 tempboard = copy.deepcopy(self.board)
                 self.make_move(move)
@@ -353,7 +421,7 @@ class JungleChess:
             return max_eval, best_move
         else:
             min_eval = float('inf')
-            for move in self.get_all_legal_moves(-1):
+            for move in self.get_all_legal_moves(1):
 
                 tempboard = copy.deepcopy(self.board)
                 self.make_move(move)
@@ -472,12 +540,7 @@ if __name__ == "__main__":
 
         if game.current_player == 1:
             print("ai thinking...")
-            # move = game.getBestMove(depth=5)
-
-            # if game.get_blue_num() > 4:
             _, move = game.minimax2(4, float('-inf'), float('inf'), True)
-            # else:
-            #     _, move = game.minimax2(10, float('-inf'), float('inf'), True)
         else:
             move = game.getHumanInput()  # 获取人类玩家的动作
         
@@ -491,7 +554,7 @@ if __name__ == "__main__":
             game.evaluate()
             game.current_player *= -1  # 切换玩家
 
-    if game.isGameOver() == -10000:
+    if game.isGameOver() == -1:
         print("you win")
     else:
         print("ai win")

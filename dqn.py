@@ -12,7 +12,7 @@ class JungleChessEnv(gym.Env):
     def __init__(self):
         super(JungleChessEnv, self).__init__()
         self.game = JungleChess()
-        self.action_space = spaces.Discrete(9 * 7 * 9 * 7)  # from_row, from_col, to_row, to_col
+        self.action_space = spaces.Discrete(8686)  # from_row, from_col, to_row, to_col
         self.observation_space = spaces.Box(low=0, high=1000, shape=(9, 7), dtype=int)
 
     def reset(self):
@@ -25,10 +25,9 @@ class JungleChessEnv(gym.Env):
         done = False
         self.game.current_player = 1
 
-        print("step, ", move)
-
         if self.game.make_move(move):
             reward = self.game.evaluate()
+            # print("reward ", reward)
             if self.game.isGameOver() != 0:
                 done = True
                 reward += self.game.isGameOver()
@@ -36,24 +35,38 @@ class JungleChessEnv(gym.Env):
                 # Opponent move using minimax2
                 self.game.current_player = -1
                 _, opponent_move = self.game.minimax2(6, float('-inf'), float('inf'), True)
+
+                # print("mini max move :", opponent_move)
                 self.game.make_move(opponent_move)
-                reward -= self.game.evaluate()
+
+                if self.game.evaluate() < 0:
+                    reward += self.game.evaluate()
+                else:
+                    reward -= self.game.evaluate()
                 if self.game.isGameOver() != 0:
                     done = True
                     reward -= self.game.isGameOver()
-
-            
         else:
             reward = -10  # Illegal move penalty
+
+        print("step ", reward)
 
         return np.array(self.game.board), reward, done, {}
 
     def action_to_tuple(self, action):
-        from_row = action // (9 * 7 * 9 * 7)
-        from_col = (action % (9 * 7 * 9 * 7)) // (9 * 7)
-        to_row = (action % (9 * 7)) // 7
-        to_col = action % 7
+        from_row = action // 1000
+        from_col = (action % 1000) // 100
+        to_row = (action % 100) // 10
+        to_col = action % 10
         return [from_row, from_col, to_row, to_col]
+
+    # def tuple_to_action(self, move):
+    #     from_row, from_col, to_row, to_col = move
+    #     return (from_row * 9 * 7 * 9 * 7) + (from_col * 9 * 7) + (to_row * 7) + to_col
+    
+    def tuple_to_action(self, move):
+        from_row, from_col, to_row, to_col = move
+        return  from_row*1000 + from_col*100 + to_row * 10 + to_col
 
     def render(self, mode='human'):
         self.game.showBoard()
@@ -88,9 +101,9 @@ class DQNAgent:
         legal_moves = game.get_all_legal_moves(1)  # AI's legal moves
         if random.random() < epsilon:
             # Randomly select a legal move
-            action = random.choice(legal_moves)
+            move = random.choice(legal_moves)
         else:
-            state_tensor = torch.FloatTensor(state).unsqueeze(0)
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).view(-1)
             q_values = self.model(state_tensor).detach().numpy().flatten()
 
             # Filter Q-values to only consider legal moves
@@ -99,13 +112,13 @@ class DQNAgent:
 
             # Select the action with the highest Q-value among legal moves
             best_action_index = np.argmax(legal_q_values)
-            action = legal_move_actions[best_action_index]
+            move = legal_moves[best_action_index]
 
-        return self.tuple_to_action(action)  # Return action as tuple
+        return self.tuple_to_action(move)  # Return action as tuple
 
     def tuple_to_action(self, move):
         from_row, from_col, to_row, to_col = move
-        return (from_row * 9 * 7 * 9 * 7) + (from_col * 9 * 7) + (to_row * 7) + to_col
+        return  from_row*1000 + from_col*100 + to_row * 10 + to_col
 
     def train(self, batch_size, gamma):
         if len(self.memory) < batch_size:
@@ -114,10 +127,10 @@ class DQNAgent:
         batch = random.sample(self.memory, batch_size)
         states, actions, rewards, next_states, dones = zip(*batch)
 
-        states = torch.FloatTensor(states)
+        states = torch.FloatTensor(np.array(states)).view(batch_size, -1)
         actions = torch.LongTensor(actions)
         rewards = torch.FloatTensor(rewards)
-        next_states = torch.FloatTensor(next_states)
+        next_states = torch.FloatTensor(np.array(next_states)).view(batch_size, -1)
         dones = torch.FloatTensor(dones)
 
         q_values = self.model(states)
@@ -133,7 +146,7 @@ class DQNAgent:
         loss.backward()
         self.optimizer.step()
 
-def train_dqn(env, agent, episodes, batch_size, gamma, epsilon_start, epsilon_end, epsilon_decay):
+def train_dqn(env, agent, episodes, batch_size, gamma, epsilon_start, epsilon_end, epsilon_decay, save_interval=100):
     epsilon = epsilon_start
     for episode in range(episodes):
         state = env.reset()
@@ -143,6 +156,9 @@ def train_dqn(env, agent, episodes, batch_size, gamma, epsilon_start, epsilon_en
         while not done:
             action = agent.get_action(state, epsilon, env.game)
             next_state, reward, done, _ = env.step(action)
+
+            # print("rew ", reward)
+
             agent.memory.append((state, action, reward, next_state, done))
             state = next_state
             total_reward += reward
@@ -154,6 +170,12 @@ def train_dqn(env, agent, episodes, batch_size, gamma, epsilon_start, epsilon_en
 
         print(f"Episode: {episode}, Total Reward: {total_reward}, Epsilon: {epsilon}")
 
+        # Save the model every 'save_interval' episodes
+        if (episode + 1) % save_interval == 0:
+            model_path = f"model_{episode + 1}.pth"
+            torch.save(agent.model.state_dict(), model_path)
+            print(f"Model saved at episode {episode + 1}")
+
 if __name__ == "__main__":
     env = JungleChessEnv()
     state_dim = env.observation_space.shape[0] * env.observation_space.shape[1]
@@ -161,4 +183,4 @@ if __name__ == "__main__":
 
     agent = DQNAgent(state_dim, action_dim)
 
-    train_dqn(env, agent, episodes=1000, batch_size=64, gamma=0.99, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995)
+    train_dqn(env, agent, episodes=1, batch_size=64, gamma=0.99, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995)

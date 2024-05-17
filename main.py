@@ -190,14 +190,15 @@ class JungleChess:
 
     def make_move(self, move)->bool:
         # 执行动作并返回新的状态
-
-        if len(move) != 4:
-            print("false 1")
-            return False
-
         role = "me"
         if self.current_player == 1:
             role = "ai"
+
+        # print("make move ", role, move)
+
+        if len(move) != 4:
+            print("false 1 " , role, move)
+            return False
 
         fromRow, fromCol, toRow, toCol = move
 
@@ -458,36 +459,39 @@ class JungleChess:
                 if j > 10 and j < 100:
                     ret += 1
         return ret
-        
-# 使用示例
-game = JungleChess()
-while game.isGameOver() == 0:
-    move = None
-
-    current_player = game.current_player
-
-    if game.current_player == 1:
-        print("ai thinking...")
-        # move = game.getBestMove(depth=5)
-
-        if game.get_blue_num() > 4:
-            _, move = game.minimax2(6, float('-inf'), float('inf'), True)
-        else:
-            _, move = game.minimax2(10, float('-inf'), float('inf'), True)
-    else:
-        move = game.getHumanInput()  # 获取人类玩家的动作
     
-    game.current_player = current_player
 
-    print("move ", move)
-    b = game.make_move(move)
+if __name__ == "__main__":
+            
+    # 使用示例
+    game = JungleChess()
+    while game.isGameOver() == 0:
+        move = None
 
-    if b:
-        game.showBoard()
-        game.evaluate()
-        game.current_player *= -1  # 切换玩家
+        current_player = game.current_player
 
-if game.isGameOver() == -10000:
-    print("you win")
-else:
-    print("ai win")
+        if game.current_player == 1:
+            print("ai thinking...")
+            # move = game.getBestMove(depth=5)
+
+            # if game.get_blue_num() > 4:
+            _, move = game.minimax2(4, float('-inf'), float('inf'), True)
+            # else:
+            #     _, move = game.minimax2(10, float('-inf'), float('inf'), True)
+        else:
+            move = game.getHumanInput()  # 获取人类玩家的动作
+        
+        game.current_player = current_player
+
+        print("move ", move)
+        b = game.make_move(move)
+
+        if b:
+            game.showBoard()
+            game.evaluate()
+            game.current_player *= -1  # 切换玩家
+
+    if game.isGameOver() == -10000:
+        print("you win")
+    else:
+        print("ai win")

@@ -34,18 +34,22 @@ class JungleChessEnv(gym.Env):
             else:
                 # Opponent move using minimax2
                 self.game.current_player = -1
-                _, opponent_move = self.game.minimax2(6, float('-inf'), float('inf'), True)
 
-                # print("mini max move :", opponent_move)
+                # 用 minimax 的话，很多 case 走不到
+                # _, opponent_move = self.game.minimax2(6, float('-inf'), float('inf'), True)
+
+                legal_moves = self.game.get_all_legal_moves(-1)  # minimax's legal moves
+                opponent_move = random.choice(legal_moves)
+
+
+                print("mini max move :", opponent_move)
                 self.game.make_move(opponent_move)
 
-                if self.game.evaluate() < 0:
-                    reward += self.game.evaluate()
-                else:
-                    reward -= self.game.evaluate()
+                reward += self.game.evaluate()
+                 
                 if self.game.isGameOver() != 0:
                     done = True
-                    reward -= self.game.isGameOver()
+                    reward += self.game.isGameOver()  #蓝军赢 1
         else:
             reward = -10  # Illegal move penalty
 
@@ -101,6 +105,11 @@ class DQNAgent:
         legal_moves = game.get_all_legal_moves(1)  # AI's legal moves
         if random.random() < epsilon:
             # Randomly select a legal move
+
+            if len(legal_moves) == 0:
+                game.showBoard()
+                assert False, "legal_moves == null"
+
             move = random.choice(legal_moves)
         else:
             state_tensor = torch.FloatTensor(state).unsqueeze(0).view(-1)
@@ -110,9 +119,15 @@ class DQNAgent:
             legal_move_actions = [self.tuple_to_action(move) for move in legal_moves]
             legal_q_values = [q_values[action] for action in legal_move_actions]
 
-            # Select the action with the highest Q-value among legal moves
-            best_action_index = np.argmax(legal_q_values)
-            move = legal_moves[best_action_index]
+            if len(legal_q_values) == 0:
+                # 如果没有合法动作，将选择一个随机合法动作
+                game.showBoard()
+                print("legal_moves", legal_moves)
+                move = random.choice(legal_moves)
+            else:
+                # Select the action with the highest Q-value among legal moves
+                best_action_index = np.argmax(legal_q_values)
+                move = legal_moves[best_action_index]
 
         return self.tuple_to_action(move)  # Return action as tuple
 
@@ -183,4 +198,4 @@ if __name__ == "__main__":
 
     agent = DQNAgent(state_dim, action_dim)
 
-    train_dqn(env, agent, episodes=1, batch_size=64, gamma=0.99, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995)
+    train_dqn(env, agent, episodes=1000, batch_size=64, gamma=0.99, epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995)

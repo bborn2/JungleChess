@@ -4,8 +4,8 @@ import torch.nn as nn
 import torch.optim as optim
 from collections import deque
 from main import JungleChess
-from dqn import JungleChessEnv
-from dqn import DQN
+from train import JungleChessEnv
+from train import DQN
 
 
 

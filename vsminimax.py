@@ -25,7 +25,7 @@ if __name__ == "__main__":
 
         if b:
             game.showBoard()
-            game.evaluate()
+            print(game.evaluate())
             game.current_player *= -1  # 切换玩家
 
     if game.isGameOver() == -1:

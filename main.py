@@ -130,10 +130,10 @@ class JungleChess:
             return False
         
         while f > 10:
-            f = f/10
-        
+            f = f // 10
+
         while t > 10:
-            t = t/10
+            t = t // 10
          
         if self.isEnterTrap(toRow, toCol):
             return True
@@ -165,7 +165,7 @@ class JungleChess:
         v = self.board[row][col]
         
         while v > 10:
-            v = v / 10
+            v = v // 10
 
         if v == 2:
             return True
@@ -182,7 +182,7 @@ class JungleChess:
         v = self.board[row][col]
         
         while v > 10:
-            v = v / 10
+            v = v // 10
 
         if v == 7 or v == 8:
             return True

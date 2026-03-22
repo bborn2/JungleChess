@@ -1,3 +1,5 @@
 myenv/
 __pycache__
-*.pth
+*.pthmodels/*.pt
+__pycache__/
+.python-version

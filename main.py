@@ -538,6 +538,43 @@ class JungleChess:
                 if j > 10 and j < 100:
                     ret += 1
         return ret
+
+    def copy(self):
+        """Return a deep copy of the game state for MCTS."""
+        new_game = JungleChess.__new__(JungleChess)
+        new_game.board = copy.deepcopy(self.board)
+        new_game.current_player = self.current_player
+        new_game.lastmove = self.lastmove[:]
+        new_game.piece_map = self.piece_map
+        return new_game
+
+    def get_canonical_board(self, player):
+        """Return board from the perspective of `player` (always as if playing blue).
+        If player is red (-1), flip the board vertically and swap piece encodings."""
+        if player == 1:
+            return self.board
+        # Flip board vertically and swap blue/red encodings
+        flipped = []
+        for row in reversed(self.board):
+            new_row = []
+            for cell in row:
+                terrain = cell % 10
+                if 10 < cell < 100:  # blue → red
+                    piece_type = cell // 10
+                    new_row.append(piece_type * 100 + terrain)
+                elif cell > 100:  # red → blue
+                    piece_type = cell // 100
+                    new_row.append(piece_type * 10 + terrain)
+                else:
+                    # Swap den markers: 3↔4
+                    if terrain == 3:
+                        new_row.append(4)
+                    elif terrain == 4:
+                        new_row.append(3)
+                    else:
+                        new_row.append(cell)
+            flipped.append(new_row)
+        return flipped
     
 
 if __name__ == "__main__":

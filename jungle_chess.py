@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """斗兽棋 (Jungle Chess) CLI"""
+import math
 
 COLS, ROWS = 7, 9
 
@@ -148,6 +149,162 @@ class Game:
         print()
 
 
+# ── Minimax + Alpha-Beta ───────────────────────────────────────────────────────
+
+_PIECE_VAL = {8: 900, 7: 500, 6: 400, 5: 300, 4: 200, 3: 150, 2: 100, 1: 80}
+
+# Transposition table: hash -> (depth, value, flag)  flag: 0=exact 1=lower 2=upper
+_TT: dict = {}
+_TT_MAX = 200_000
+
+
+def _board_hash(game):
+    return hash(tuple(sorted((p.player, p.name, p.col, p.row) for p in game.pieces))
+                + (game.turn,))
+
+
+def _evaluate(game, player):
+    enemy = 2 if player == 1 else 1
+
+    # Build set of squares the enemy threatens next move
+    enemy_attacks: set = set()
+    for p in game.pieces:
+        if p.player == enemy:
+            for nc, nr, _ in game.get_moves(p):
+                enemy_attacks.add((nc, nr))
+
+    score = 0
+    for p in game.pieces:
+        val = _PIECE_VAL[p.rank]
+        e_den = DEN[enemy if p.player == player else player]
+        dist  = abs(p.col - e_den[0]) + abs(p.row - e_den[1])
+        pos   = (12 - dist) * 4
+
+        # Trap bonus: enemy piece sitting in our trap is nearly dead
+        if p.player == enemy and p.pos() in TRAPS[player]:
+            val = 0   # effectively captured already
+
+        if p.player == player:
+            total = val + pos
+            # Penalty if this piece is under attack
+            if p.pos() in enemy_attacks:
+                total -= val // 2
+            score += total
+        else:
+            score -= val + pos
+
+    return score
+
+
+def _move_priority(p, nc, nr, cap, ai_player):
+    """Higher = search first (for move ordering)."""
+    enemy = 2 if p.player == 1 else 1
+    if (nc, nr) == DEN[enemy]:
+        return 100_000                          # winning move
+    if cap:
+        return 1000 + cap.rank * 10 - p.rank   # MVV-LVA
+    # Advance toward enemy den
+    den = DEN[enemy]
+    return -(abs(nc - den[0]) + abs(nr - den[1]))
+
+
+def _minimax(game, depth, alpha, beta, maximizing, ai_player):
+    if game.winner == ai_player:
+        return 100_000 + depth, None
+    if game.winner is not None:
+        return -100_000 - depth, None
+    if depth == 0:
+        return _evaluate(game, ai_player), None
+
+    # Transposition table lookup
+    h = _board_hash(game)
+    tt = _TT.get(h)
+    if tt and tt[0] >= depth:
+        td, tv, tf = tt
+        if tf == 0:
+            return tv, None
+        if tf == 1 and tv > alpha:
+            alpha = tv
+        if tf == 2 and tv < beta:
+            beta = tv
+        if alpha >= beta:
+            return tv, None
+
+    player = game.turn
+    moves  = game.all_moves(player)
+    if not moves:
+        game.winner = 2 if player == 1 else 1
+        result = _minimax(game, 0, alpha, beta, maximizing, ai_player)
+        game.winner = None
+        return result
+
+    # Move ordering
+    moves.sort(key=lambda pm: _move_priority(pm[0], pm[1][0], pm[1][1], pm[1][2], ai_player),
+               reverse=True)
+
+    orig_alpha = alpha
+    best_move  = None
+
+    if maximizing:
+        best = -math.inf
+        for p, (nc, nr, cap) in moves:
+            pc, pr = p.col, p.row
+            if cap: game.pieces.remove(cap)
+            p.col, p.row = nc, nr
+            prev_winner, prev_turn = game.winner, game.turn
+            e = 2 if p.player == 1 else 1
+            if (nc, nr) == DEN[e] or not any(x.player == e for x in game.pieces):
+                game.winner = p.player
+            game.turn = e
+            val, _ = _minimax(game, depth - 1, alpha, beta, False, ai_player)
+            p.col, p.row = pc, pr
+            if cap: game.pieces.append(cap)
+            game.winner, game.turn = prev_winner, prev_turn
+            if val > best:
+                best, best_move = val, (pc, pr, nc, nr)
+            alpha = max(alpha, best)
+            if beta <= alpha:
+                break
+    else:
+        best = math.inf
+        for p, (nc, nr, cap) in moves:
+            pc, pr = p.col, p.row
+            if cap: game.pieces.remove(cap)
+            p.col, p.row = nc, nr
+            prev_winner, prev_turn = game.winner, game.turn
+            e = 2 if p.player == 1 else 1
+            if (nc, nr) == DEN[e] or not any(x.player == e for x in game.pieces):
+                game.winner = p.player
+            game.turn = e
+            val, _ = _minimax(game, depth - 1, alpha, beta, True, ai_player)
+            p.col, p.row = pc, pr
+            if cap: game.pieces.append(cap)
+            game.winner, game.turn = prev_winner, prev_turn
+            if val < best:
+                best, best_move = val, (pc, pr, nc, nr)
+            beta = min(beta, best)
+            if beta <= alpha:
+                break
+
+    # Store in transposition table
+    if len(_TT) < _TT_MAX:
+        flag = 0 if orig_alpha < best < beta else (1 if best >= beta else 2)
+        _TT[h] = (depth, best, flag)
+
+    return best, best_move
+
+
+def ai_best_move(game, depth=7):
+    _TT.clear()
+    ai_player = game.turn
+    _, move = _minimax(game, depth, -math.inf, math.inf, True, ai_player)
+    return move
+
+
+
+
+# ── CLI helpers ────────────────────────────────────────────────────────────────
+
 def ask_coord(prompt):
     while True:
         try:
@@ -164,14 +321,23 @@ def main():
     print("=" * 40)
     print("       斗兽棋  Jungle Chess")
     print("  红方(1) 底部出发  蓝方(2) 顶部出发")
-    print("  输入格式：列 行  (例如: 3 4)")
-    print("  输入 q 退出")
+    print("=" * 40)
+    print("  模式: [1] 双人对战  [2] 人 vs AI  [3] AI vs 人")
+    mode = input("  选择模式 (默认1): ").strip() or "1"
+    ai_player = None
+    if mode == "2":
+        ai_player = 2
+        print("  你执红方，AI 执蓝方")
+    elif mode == "3":
+        ai_player = 1
+        print("  AI 执红方，你执蓝方")
+    print("  输入格式：列 行  (例如: 3 4)，输入 q 退出")
     print("=" * 40)
 
     while game.winner is None:
         game.display()
         player = game.turn
-        color = '\033[91m红\033[0m' if player == 1 else '\033[94m蓝\033[0m'
+        color  = '\033[91m红\033[0m' if player == 1 else '\033[94m蓝\033[0m'
         print(f">>> {color}方回合")
 
         all_moves = game.all_moves(player)
@@ -180,12 +346,22 @@ def main():
             print("无子可走，对方获胜！")
             break
 
-        # Select piece
+        # ── AI turn ──
+        if player == ai_player:
+            print("  AI 思考中…")
+            pc, pr, nc, nr = ai_best_move(game)
+            piece    = game.piece_at(pc, pr)
+            captured = game.piece_at(nc, nr)
+            print(f"  AI 走: {piece} ({pc},{pr}) → ({nc},{nr})"
+                  + (f"  吃{captured}" if captured else ""))
+            game.apply_move(piece, nc, nr, captured)
+            continue
+
+        # ── Human turn ──
         while True:
             raw = input("  选择棋子 (列 行): ").strip()
             if raw.lower() == 'q':
-                print("退出游戏。")
-                return
+                print("退出游戏。"); return
             try:
                 c, r = map(int, raw.split())
             except ValueError:

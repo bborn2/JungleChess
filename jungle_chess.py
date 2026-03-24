@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
 """斗兽棋 (Jungle Chess) CLI"""
 import math
+import json
+import os
+import time
+import random
+
+SAVE_FILE = os.path.join(os.path.dirname(__file__), "savegame.json")
 
 COLS, ROWS = 7, 9
 
@@ -114,9 +120,35 @@ class Game:
             self.winner = piece.player
         self.turn = enemy
 
+    def save(self):
+        data = {
+            "turn": self.turn,
+            "pieces": [{"col": p.col, "row": p.row, "player": p.player, "name": p.name}
+                       for p in self.pieces],
+        }
+        with open(SAVE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+    @classmethod
+    def load(cls):
+        with open(SAVE_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        g = cls.__new__(cls)
+        g.winner = None
+        g.turn = data["turn"]
+        g.pieces = [Piece(d["col"], d["row"], d["player"], d["name"]) for d in data["pieces"]]
+        return g
+
     def all_moves(self, player):
         return [(p, m) for p in self.pieces if p.player == player
                 for m in self.get_moves(p)]
+
+    def clone(self):
+        g = Game.__new__(Game)
+        g.pieces = [Piece(p.col, p.row, p.player, p.name) for p in self.pieces]
+        g.turn = self.turn
+        g.winner = self.winner
+        return g
 
     def display(self):
         R, B, C, X = '\033[91m', '\033[94m', '\033[96m', '\033[0m'
@@ -149,156 +181,256 @@ class Game:
         print()
 
 
-# ── Minimax + Alpha-Beta ───────────────────────────────────────────────────────
+# ── MCTS AI ───────────────────────────────────────────────────────────────────
 
-_PIECE_VAL = {8: 900, 7: 500, 6: 400, 5: 300, 4: 200, 3: 150, 2: 100, 1: 80}
+# Fast board: board[col*9+row] = (player, rank) or None
+# piece_locs[player] = set of board indices for that player's pieces
 
-# Transposition table: hash -> (depth, value, flag)  flag: 0=exact 1=lower 2=upper
-_TT: dict = {}
-_TT_MAX = 200_000
+_RIVER_SET = frozenset(c * 9 + r for c in (1, 2, 4, 5) for r in (3, 4, 5))
+_DEN_IDX = {1: 3 * 9 + 8, 2: 3 * 9 + 0}
+_TRAP_IDX = {
+    1: frozenset([2*9+8, 4*9+8, 3*9+7]),
+    2: frozenset([2*9+0, 4*9+0, 3*9+1]),
+}
+_DIRS = ((0, -1), (0, 1), (-1, 0), (1, 0))
 
 
-def _board_hash(game):
-    return hash(tuple(sorted((p.player, p.name, p.col, p.row) for p in game.pieces))
-                + (game.turn,))
-
-
-def _evaluate(game, player):
-    enemy = 2 if player == 1 else 1
-
-    # Build set of squares the enemy threatens next move
-    enemy_attacks: set = set()
+def _fast_from_game(game):
+    board = [None] * 63
+    locs = {1: [], 2: []}
     for p in game.pieces:
-        if p.player == enemy:
-            for nc, nr, _ in game.get_moves(p):
-                enemy_attacks.add((nc, nr))
-
-    score = 0
-    for p in game.pieces:
-        val = _PIECE_VAL[p.rank]
-        e_den = DEN[enemy if p.player == player else player]
-        dist  = abs(p.col - e_den[0]) + abs(p.row - e_den[1])
-        pos   = (12 - dist) * 4
-
-        # Trap bonus: enemy piece sitting in our trap is nearly dead
-        if p.player == enemy and p.pos() in TRAPS[player]:
-            val = 0   # effectively captured already
-
-        if p.player == player:
-            total = val + pos
-            # Penalty if this piece is under attack
-            if p.pos() in enemy_attacks:
-                total -= val // 2
-            score += total
-        else:
-            score -= val + pos
-
-    return score
+        idx = p.col * 9 + p.row
+        board[idx] = (p.player, p.rank)
+        locs[p.player].append(idx)
+    return board, locs, game.turn
 
 
-def _move_priority(p, nc, nr, cap, ai_player):
-    """Higher = search first (for move ordering)."""
-    enemy = 2 if p.player == 1 else 1
-    if (nc, nr) == DEN[enemy]:
-        return 100_000                          # winning move
-    if cap:
-        return 1000 + cap.rank * 10 - p.rank   # MVV-LVA
-    # Advance toward enemy den
-    den = DEN[enemy]
-    return -(abs(nc - den[0]) + abs(nr - den[1]))
+def _fast_moves(board, locs, turn):
+    """Get moves for current player. Returns list of (from_idx, to_idx)."""
+    moves = []
+    enemy = 2 if turn == 1 else 1
+    own_den = _DEN_IDX[turn]
+    enemy_traps = _TRAP_IDX[turn]
+
+    for idx in locs[turn]:
+        col, row = divmod(idx, 9)
+        rank = board[idx][1]
+
+        for dc, dr in _DIRS:
+            nc, nr = col + dc, row + dr
+            if not (0 <= nc < 7 and 0 <= nr < 9):
+                continue
+            nidx = nc * 9 + nr
+            if nidx == own_den:
+                continue
+
+            if nidx in _RIVER_SET:
+                if rank == 1:  # rat
+                    target = board[nidx]
+                    if target is None:
+                        moves.append((idx, nidx))
+                    elif target[0] == enemy:
+                        if idx in _RIVER_SET or target[1] == 8:
+                            moves.append((idx, nidx))
+                elif rank in (6, 7):  # tiger/lion jump
+                    jc, jr = nc, nr
+                    jidx = jc * 9 + jr
+                    blocked = False
+                    while jidx in _RIVER_SET:
+                        if board[jidx] is not None:
+                            blocked = True; break
+                        jc += dc; jr += dr
+                        if not (0 <= jc < 7 and 0 <= jr < 9):
+                            blocked = True; break
+                        jidx = jc * 9 + jr
+                    if not blocked and jidx != own_den:
+                        target = board[jidx]
+                        if target is None:
+                            moves.append((idx, jidx))
+                        elif target[0] == enemy:
+                            t_rank = 0 if jidx in enemy_traps else target[1]
+                            if rank >= t_rank:
+                                moves.append((idx, jidx))
+            else:
+                target = board[nidx]
+                if target is None:
+                    moves.append((idx, nidx))
+                elif target[0] == enemy:
+                    t_rank = 0 if nidx in enemy_traps else target[1]
+                    if rank == 1 and target[1] == 8 and idx not in _RIVER_SET:
+                        moves.append((idx, nidx))
+                    elif rank == 8 and target[1] == 1:
+                        pass
+                    elif rank >= t_rank:
+                        moves.append((idx, nidx))
+    return moves
 
 
-def _minimax(game, depth, alpha, beta, maximizing, ai_player):
-    if game.winner == ai_player:
-        return 100_000 + depth, None
-    if game.winner is not None:
-        return -100_000 - depth, None
-    if depth == 0:
-        return _evaluate(game, ai_player), None
+def _fast_simulate(board, locs, turn):
+    """Fast playout with heuristics. Returns winner (1/2) or 0."""
+    _choice = random.choice
+    for step in range(200):
+        moves = _fast_moves(board, locs, turn)
+        enemy = 2 if turn == 1 else 1
+        if not moves:
+            return enemy
 
-    # Transposition table lookup
-    h = _board_hash(game)
-    tt = _TT.get(h)
-    if tt and tt[0] >= depth:
-        td, tv, tf = tt
-        if tf == 0:
-            return tv, None
-        if tf == 1 and tv > alpha:
-            alpha = tv
-        if tf == 2 and tv < beta:
-            beta = tv
-        if alpha >= beta:
-            return tv, None
+        enemy_den = _DEN_IDX[enemy]
 
-    player = game.turn
-    moves  = game.all_moves(player)
-    if not moves:
-        game.winner = 2 if player == 1 else 1
-        result = _minimax(game, 0, alpha, beta, maximizing, ai_player)
-        game.winner = None
-        return result
+        # Pick move with simple heuristics (no enemy threat calc for speed)
+        best_move = None
+        best_score = -1
 
-    # Move ordering
-    moves.sort(key=lambda pm: _move_priority(pm[0], pm[1][0], pm[1][1], pm[1][2], ai_player),
-               reverse=True)
-
-    orig_alpha = alpha
-    best_move  = None
-
-    if maximizing:
-        best = -math.inf
-        for p, (nc, nr, cap) in moves:
-            pc, pr = p.col, p.row
-            if cap: game.pieces.remove(cap)
-            p.col, p.row = nc, nr
-            prev_winner, prev_turn = game.winner, game.turn
-            e = 2 if p.player == 1 else 1
-            if (nc, nr) == DEN[e] or not any(x.player == e for x in game.pieces):
-                game.winner = p.player
-            game.turn = e
-            val, _ = _minimax(game, depth - 1, alpha, beta, False, ai_player)
-            p.col, p.row = pc, pr
-            if cap: game.pieces.append(cap)
-            game.winner, game.turn = prev_winner, prev_turn
-            if val > best:
-                best, best_move = val, (pc, pr, nc, nr)
-            alpha = max(alpha, best)
-            if beta <= alpha:
+        for from_idx, to_idx in moves:
+            if to_idx == enemy_den:
+                best_move = (from_idx, to_idx)
+                best_score = 9999
                 break
-    else:
-        best = math.inf
-        for p, (nc, nr, cap) in moves:
-            pc, pr = p.col, p.row
-            if cap: game.pieces.remove(cap)
-            p.col, p.row = nc, nr
-            prev_winner, prev_turn = game.winner, game.turn
-            e = 2 if p.player == 1 else 1
-            if (nc, nr) == DEN[e] or not any(x.player == e for x in game.pieces):
-                game.winner = p.player
-            game.turn = e
-            val, _ = _minimax(game, depth - 1, alpha, beta, True, ai_player)
-            p.col, p.row = pc, pr
-            if cap: game.pieces.append(cap)
-            game.winner, game.turn = prev_winner, prev_turn
-            if val < best:
-                best, best_move = val, (pc, pr, nc, nr)
-            beta = min(beta, best)
-            if beta <= alpha:
-                break
+            target = board[to_idx]
+            if target is not None:
+                score = 50 + target[1] * 5
+                if score > best_score:
+                    best_score = score
+                    best_move = (from_idx, to_idx)
 
-    # Store in transposition table
-    if len(_TT) < _TT_MAX:
-        flag = 0 if orig_alpha < best < beta else (1 if best >= beta else 2)
-        _TT[h] = (depth, best, flag)
+        # 30% of the time, pick random move for exploration
+        if best_move is None or (best_score < 100 and step > 0 and random.random() < 0.3):
+            best_move = _choice(moves)
 
-    return best, best_move
+        from_idx, to_idx = best_move
+        captured = board[to_idx]
+        board[to_idx] = board[from_idx]
+        board[from_idx] = None
+        # Update locs
+        pl = locs[turn]
+        for i in range(len(pl)):
+            if pl[i] == from_idx:
+                pl[i] = to_idx; break
+        if captured is not None:
+            el = locs[enemy]
+            for i in range(len(el)):
+                if el[i] == to_idx:
+                    el.pop(i); break
+
+        if to_idx == _DEN_IDX[enemy] or not locs[enemy]:
+            return turn
+        turn = enemy
+    return 0
 
 
-def ai_best_move(game, depth=7):
-    _TT.clear()
-    ai_player = game.turn
-    _, move = _minimax(game, depth, -math.inf, math.inf, True, ai_player)
-    return move
+_C = 1.41421356
+
+
+class MCTSNode:
+    __slots__ = ('board', 'locs', 'turn', 'winner', 'move',
+                 'parent', 'children', 'wins', 'visits', 'untried')
+
+    def __init__(self, board, locs, turn, winner, move=None, parent=None):
+        self.board = board
+        self.locs = locs
+        self.turn = turn
+        self.winner = winner
+        self.move = move  # (piece_idx_in_game, nc, nr) for translating back
+        self.parent = parent
+        self.children = []
+        self.wins = 0.0
+        self.visits = 0
+        self.untried = _fast_moves(board, locs, turn) if winner is None else []
+
+    def select_child(self):
+        log_parent = math.log(self.visits)
+        best = None
+        best_val = -1.0
+        for c in self.children:
+            v = c.visits
+            if v == 0:
+                return c
+            val = c.wins / v + _C * math.sqrt(log_parent / v)
+            if val > best_val:
+                best_val = val
+                best = c
+        return best
+
+    def expand(self):
+        from_idx, to_idx = self.untried.pop()
+        # Clone board and locs
+        nb = self.board[:]
+        nl = {1: self.locs[1][:], 2: self.locs[2][:]}
+        captured = nb[to_idx]
+        nb[to_idx] = nb[from_idx]
+        nb[from_idx] = None
+        # Update locs
+        pl = nl[self.turn]
+        for i in range(len(pl)):
+            if pl[i] == from_idx:
+                pl[i] = to_idx; break
+        enemy = 2 if self.turn == 1 else 1
+        winner = None
+        if captured is not None:
+            el = nl[enemy]
+            for i in range(len(el)):
+                if el[i] == to_idx:
+                    el.pop(i); break
+        if to_idx == _DEN_IDX[enemy] or not nl[enemy]:
+            winner = self.turn
+        child = MCTSNode(nb, nl, enemy, winner,
+                         move=(from_idx, to_idx), parent=self)
+        self.children.append(child)
+        return child
+
+    def backpropagate(self, winner):
+        node = self
+        while node is not None:
+            node.visits += 1
+            pjm = 2 if node.turn == 1 else 1  # player who just moved
+            if winner == pjm:
+                node.wins += 1.0
+            elif winner == 0:
+                node.wins += 0.5
+            node = node.parent
+
+
+def _mcts_search(game, time_limit=3.0):
+    fb, fl, ft = _fast_from_game(game)
+    root = MCTSNode(fb, fl, ft, game.winner)
+    end_time = time.time() + time_limit
+    iterations = 0
+
+    while time.time() < end_time:
+        node = root
+
+        # Select
+        while not node.untried and node.children:
+            node = node.select_child()
+
+        # Expand
+        if node.untried:
+            node = node.expand()
+
+        # Simulate
+        sb = node.board[:]
+        sl = {1: node.locs[1][:], 2: node.locs[2][:]}
+        winner = _fast_simulate(sb, sl, node.turn) if node.winner is None else node.winner
+
+        # Backpropagate
+        node.backpropagate(winner)
+        iterations += 1
+
+    print(f"  MCTS: {iterations} 次模拟")
+    if not root.children:
+        return None
+    best = max(root.children, key=lambda c: c.visits)
+    return best.move
+
+
+def ai_best_move(game):
+    move = _mcts_search(game)
+    if move is None:
+        return None
+    from_idx, to_idx = move
+    fc, fr = divmod(from_idx, 9)
+    tc, tr = divmod(to_idx, 9)
+    return (fc, fr, tc, tr)
 
 
 
@@ -317,11 +449,20 @@ def ask_coord(prompt):
 
 
 def main():
-    game = Game()
     print("=" * 40)
     print("       斗兽棋  Jungle Chess")
     print("  红方(1) 底部出发  蓝方(2) 顶部出发")
     print("=" * 40)
+
+    game = None
+    if os.path.exists(SAVE_FILE):
+        ans = input("  发现上次存档，是否加载？[y/N]: ").strip().lower()
+        if ans == "y":
+            game = Game.load()
+            print("  已加载上次棋局。")
+    if game is None:
+        game = Game()
+
     print("  模式: [1] 双人对战  [2] 人 vs AI  [3] AI vs 人")
     mode = input("  选择模式 (默认1): ").strip() or "1"
     ai_player = None
@@ -361,7 +502,8 @@ def main():
         while True:
             raw = input("  选择棋子 (列 行): ").strip()
             if raw.lower() == 'q':
-                print("退出游戏。"); return
+                game.save()
+                print("棋局已保存，退出游戏。"); return
             try:
                 c, r = map(int, raw.split())
             except ValueError:
@@ -384,7 +526,8 @@ def main():
         while True:
             raw = input("  选择目标序号: ").strip()
             if raw.lower() == 'q':
-                print("退出游戏。"); return
+                game.save()
+                print("棋局已保存，退出游戏。"); return
             try:
                 idx = int(raw)
                 if 0 <= idx < len(moves):
@@ -399,6 +542,8 @@ def main():
     game.display()
     w = '\033[91m红\033[0m' if game.winner == 1 else '\033[94m蓝\033[0m'
     print(f"游戏结束！{w}方获胜！")
+    if os.path.exists(SAVE_FILE):
+        os.remove(SAVE_FILE)
 
 
 if __name__ == '__main__':

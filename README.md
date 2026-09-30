@@ -31,4 +31,25 @@ AI 使用 MCTS，而不是 minimax 或强化学习模型。搜索过程反复执
 uv run python -m unittest -v test_jungle_chess
 ```
 
-当前还没有 PPO 训练脚本、模型存档或自我对弈流程。下一步可接入 `sb3-contrib` 的 `MaskablePPO`，先对随机策略训练，再用 MCTS 和旧模型快照评估。训练结果应以固定测试局数的胜率衡量，而不只看训练奖励。
+## 训练和评估
+
+使用 `MaskablePPO` 对随机策略训练，训练过程中会定期评估并保存最佳模型；结束时另存最终模型：
+
+```bash
+uv run python train_rl.py --timesteps 500000 --device cpu
+```
+
+训练步数、回合上限、评估频率、批次大小和模型路径都可通过 `--help` 查看和调整。先用短训练确认流程：
+
+```bash
+uv run python train_rl.py --timesteps 1024 --n-steps 128 --batch-size 64 --eval-freq 512 --eval-episodes 2 --output models/smoke
+```
+
+对随机对手或 MCTS 统计胜负：
+
+```bash
+uv run python evaluate_rl.py --model models/jungle_ppo --opponent random --episodes 20
+uv run python evaluate_rl.py --model models/jungle_ppo --opponent mcts --episodes 10 --mcts-time-limit 0.25
+```
+
+训练默认是对随机策略的单边训练，不是自我对弈。MCTS 和模型快照适合作为后续逐步增强的评估/训练对手；结果应以固定测试局数的胜率衡量，而不只看训练奖励。

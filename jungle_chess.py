@@ -401,7 +401,7 @@ class MCTSNode:
             node = node.parent
 
 
-def _mcts_search(game, time_limit=3.0):
+def _mcts_search(game, time_limit=3.0, verbose=True):
     fb, fl, ft = _fast_from_game(game)
     root = MCTSNode(fb, fl, ft, game.winner)
     end_time = time.time() + time_limit
@@ -427,15 +427,16 @@ def _mcts_search(game, time_limit=3.0):
         node.backpropagate(winner)
         iterations += 1
 
-    print(f"  MCTS: {iterations} 次模拟")
+    if verbose:
+        print(f"  MCTS: {iterations} 次模拟")
     if not root.children:
         return None
     best = max(root.children, key=lambda c: c.visits)
     return best.move
 
 
-def ai_best_move(game):
-    move = _mcts_search(game)
+def ai_best_move(game, time_limit=3.0, verbose=True):
+    move = _mcts_search(game, time_limit=time_limit, verbose=verbose)
     if move is None:
         return None
     from_idx, to_idx = move

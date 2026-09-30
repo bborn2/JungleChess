@@ -11,7 +11,7 @@ uv sync
 uv run python jungle_chess.py
 ```
 
-选择双人对战或人机对战，按提示输入棋子坐标和目标序号；输入 `q` 可保存当前棋局并退出。菜单中的 `[4] 人 vs PPO 模型` 默认加载仓库附带的新检查点 `models/canonical_10k/best/best_model`，也可以输入其他兼容的模型路径；该模式支持选择红方或蓝方，无需先训练。
+选择双人对战或人机对战，按提示输入棋子坐标和目标序号；输入 `q` 可保存当前棋局并退出。菜单中的 `[4] 人 vs PPO 模型` 默认加载仓库附带的新检查点 `models/canonical_100k/best/best_model`，也可以输入其他兼容的模型路径；该模式支持选择红方或蓝方，无需先训练。
 
 在本机 WSL 上已有独立的 CPU 环境，可避免使用项目目录中未完成安装的 `.venv`：
 
@@ -46,7 +46,7 @@ uv run python -m unittest -v test_jungle_chess
 
 **旧模型不兼容**：`models/experiment_10k/` 的历史权重使用旧的绝对坐标动作，不能直接用于修复后的环境。请重新训练，不要只修改模型标记。新训练会将 `jungle_action_encoding = "player-relative-v1"` 保存到最终模型和最佳检查点中；CLI 和评估脚本拒绝缺少或不匹配该标记的模型。已有历史文件不会自动删除或覆盖。
 
-仓库已附带使用修复后编码从零训练的 `models/canonical_10k/` 模型，可以直接用于评估和人机对战。`train_rl.py` 每次从零开始训练，并非继续训练已有权重；重复使用相同输出目录会覆盖其中的模型和评估日志，新的实验请另选目录。
+仓库附带 `models/canonical_10k/` 和 `models/canonical_100k/` 两组使用修复后编码从零训练的模型，可以直接用于评估和人机对战。默认使用 100k 检查点。`train_rl.py` 每次从零开始训练，并非继续训练已有权重；重复使用相同输出目录会覆盖其中的模型和评估日志，新的实验请另选目录。
 
 使用 `MaskablePPO` 对随机策略训练，训练过程中会定期评估并保存最佳模型；结束时另存最终模型：
 
@@ -63,12 +63,31 @@ uv run python train_rl.py --timesteps 1024 --n-steps 128 --batch-size 64 --eval-
 对随机对手或 MCTS 统计胜负：独立评估脚本从红方开始交替执方，偶数局数保证双方各占一半，奇数局数红方多一盘。输出包括总成绩和红、蓝方各自的局数、胜负平及胜率。训练过程中的评估回调仍使用环境随机选边，不替代这项分色评估。
 
 ```bash
-uv run python evaluate_rl.py --model models/canonical_10k/jungle_ppo --opponent random --episodes 50 --seed 1000
-uv run python evaluate_rl.py --model models/canonical_10k/best/best_model --opponent random --episodes 50 --seed 1000
-uv run python evaluate_rl.py --model models/canonical_10k/best/best_model --opponent mcts --episodes 10 --seed 1000 --mcts-time-limit 0.1
+uv run python evaluate_rl.py --model models/canonical_100k/jungle_ppo --opponent random --episodes 50 --seed 5000
+uv run python evaluate_rl.py --model models/canonical_100k/best/best_model --opponent random --episodes 50 --seed 5000
+uv run python evaluate_rl.py --model models/canonical_100k/best/best_model --opponent mcts --episodes 20 --seed 6000 --mcts-time-limit 0.1
 ```
 
 训练默认是对随机策略的单边训练，不是自我对弈。MCTS 和模型快照适合作为后续逐步增强的评估/训练对手；结果应以固定测试局数的胜率衡量，而不只看训练奖励。
+
+## 100k 训练记录
+
+2026-09-30 使用修复后的 `player-relative-v1` 编码从头训练 100k 步，耗时约 9 分钟。PPO 按 1,024 步 rollout 采样，实际完成 100,352 步。每 10k 步的 10 盘随机对手评估平均奖励依次为 `0, 1, 1, 1, 1, 1, 1, 1, 1, 1`；训练回调在 20k 步首次达到 `+1.0` 并保存最佳检查点。
+
+- `models/canonical_100k/jungle_ppo.zip`：最终权重，100,352 步。
+- `models/canonical_100k/best/best_model.zip`：训练期间最佳检查点，20,000 步。
+- `models/canonical_100k/evaluations/evaluations.npz`：训练期各检查点评估记录。
+
+以下为独立确定性评估，使用固定种子、红蓝各半；MCTS 每步搜索 0.1 秒：
+
+| 模型 | 对手 | 总胜/负/平 | 总胜率 | 执红胜/负/平 | 执蓝胜/负/平 |
+| --- | --- | --- | --- | --- | --- |
+| 最终权重 | 随机，50 盘 | 50/0/0 | 100% | 25/0/0 | 25/0/0 |
+| 最佳检查点 | 随机，50 盘 | 50/0/0 | 100% | 25/0/0 | 25/0/0 |
+| 最终权重 | MCTS，20 盘 | 19/1/0 | 95% | 9/1/0 | 10/0/0 |
+| 最佳检查点 | MCTS，20 盘 | 19/1/0 | 95% | 9/1/0 | 10/0/0 |
+
+这些结果表明模型已学会击败本项目的随机策略和当前有限时预算的 MCTS，但 MCTS 使用启发式 rollout，0.1 秒预算不代表强引擎；每项评估也只有 20 或 50 盘，不能据此保证对更强或不同策略的泛化胜率。
 
 ## 修复后训练记录
 

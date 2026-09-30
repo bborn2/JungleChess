@@ -493,8 +493,8 @@ def main():
             human_player = input("  请输入 1 或 2: ").strip()
         ai_player = 3 - int(human_player)
         model_path = (
-            input("  PPO 模型路径 (默认 models/canonical_10k/best/best_model): ").strip()
-            or "models/canonical_10k/best/best_model"
+            input("  PPO 模型路径 (默认 models/canonical_100k/best/best_model): ").strip()
+            or "models/canonical_100k/best/best_model"
         )
         try:
             from sb3_contrib import MaskablePPO

@@ -220,6 +220,7 @@ def _fast_moves(board, locs, turn):
     for idx in locs[turn]:
         col, row = divmod(idx, 9)
         rank = board[idx][1]
+        attack_rank = 0 if idx in _TRAP_IDX[enemy] else rank
 
         for dc, dr in _DIRS:
             nc, nr = col + dc, row + dr
@@ -235,7 +236,7 @@ def _fast_moves(board, locs, turn):
                     if target is None:
                         moves.append((idx, nidx))
                     elif target[0] == enemy:
-                        if idx in _RIVER_SET or target[1] == 8:
+                        if target[1] == 8 or rank >= target[1]:
                             moves.append((idx, nidx))
                 elif rank in (6, 7):  # tiger/lion jump
                     jc, jr = nc, nr
@@ -254,7 +255,7 @@ def _fast_moves(board, locs, turn):
                             moves.append((idx, jidx))
                         elif target[0] == enemy:
                             t_rank = 0 if jidx in enemy_traps else target[1]
-                            if rank >= t_rank:
+                            if attack_rank >= t_rank:
                                 moves.append((idx, jidx))
             else:
                 target = board[nidx]
@@ -262,11 +263,13 @@ def _fast_moves(board, locs, turn):
                     moves.append((idx, nidx))
                 elif target[0] == enemy:
                     t_rank = 0 if nidx in enemy_traps else target[1]
-                    if rank == 1 and target[1] == 8 and idx not in _RIVER_SET:
+                    if idx in _RIVER_SET:
+                        pass
+                    elif rank == 1 and target[1] == 8:
                         moves.append((idx, nidx))
                     elif rank == 8 and target[1] == 1:
                         pass
-                    elif rank >= t_rank:
+                    elif attack_rank >= t_rank:
                         moves.append((idx, nidx))
     return moves
 

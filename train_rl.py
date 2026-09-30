@@ -6,7 +6,7 @@ from sb3_contrib import MaskablePPO
 from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback
 from stable_baselines3.common.monitor import Monitor
 
-from jungle_rl_env import JungleChessEnv
+from jungle_rl_env import ACTION_ENCODING, JungleChessEnv
 
 
 def parse_args():
@@ -64,6 +64,7 @@ def main():
             policy_kwargs={"net_arch": [128, 128]},
             verbose=args.verbose,
         )
+        model.jungle_action_encoding = ACTION_ENCODING
         model.learn(
             total_timesteps=args.timesteps,
             callback=evaluation_callback,

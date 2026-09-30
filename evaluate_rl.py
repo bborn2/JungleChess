@@ -4,7 +4,7 @@ import argparse
 from sb3_contrib import MaskablePPO
 
 from jungle_chess import COLS, ROWS, ai_best_move
-from jungle_rl_env import JungleChessEnv
+from jungle_rl_env import JungleChessEnv, validate_model_encoding
 
 
 def encode_move(move):
@@ -38,6 +38,33 @@ def parse_args():
     return args
 
 
+def evaluate_games(model, env, episodes: int, seed: int):
+    validate_model_encoding(model)
+    results = {
+        player: {"games": 0, "wins": 0, "losses": 0, "draws": 0}
+        for player in (1, 2)
+    }
+    for episode in range(episodes):
+        player = 1 + episode % 2
+        observation, _reset_info = env.reset(
+            seed=seed + episode, options={"player": player}
+        )
+        terminated = truncated = False
+        while not terminated and not truncated:
+            action, _state = model.predict(
+                observation,
+                action_masks=env.action_masks(),
+                deterministic=True,
+            )
+            observation, _reward, terminated, truncated, info = env.step(int(action))
+
+        winner = info.get("winner")
+        outcome = "wins" if winner == player else "draws" if winner is None else "losses"
+        results[player]["games"] += 1
+        results[player][outcome] += 1
+    return results
+
+
 def main():
     args = parse_args()
     opponent_policy = (
@@ -47,38 +74,27 @@ def main():
     )
     env = JungleChessEnv(opponent_policy=opponent_policy)
     model = MaskablePPO.load(args.model, device=args.device)
-    wins = losses = draws = 0
 
     try:
-        for episode in range(args.episodes):
-            observation, reset_info = env.reset(seed=args.seed + episode)
-            terminated = truncated = False
-            info = reset_info
-            while not terminated and not truncated:
-                action, _state = model.predict(
-                    observation,
-                    action_masks=env.action_masks(),
-                    deterministic=True,
-                )
-                observation, _reward, terminated, truncated, info = env.step(
-                    int(action)
-                )
-
-            winner = info.get("winner")
-            if winner == info["agent_player"]:
-                wins += 1
-            elif winner is None:
-                draws += 1
-            else:
-                losses += 1
+        results = evaluate_games(model, env, args.episodes, args.seed)
     finally:
         env.close()
 
+    wins = sum(result["wins"] for result in results.values())
+    losses = sum(result["losses"] for result in results.values())
+    draws = sum(result["draws"] for result in results.values())
     print(
         f"Opponent: {args.opponent}; games: {args.episodes}; "
         f"wins: {wins}; losses: {losses}; draws: {draws}; "
         f"win rate: {wins / args.episodes:.1%}"
     )
+    for player, result in results.items():
+        rate = f"{result['wins'] / result['games']:.1%}" if result["games"] else "N/A"
+        print(
+            f"{'Red' if player == 1 else 'Blue'}: games: {result['games']}; "
+            f"wins: {result['wins']}; losses: {result['losses']}; "
+            f"draws: {result['draws']}; win rate: {rate}"
+        )
 
 
 if __name__ == "__main__":

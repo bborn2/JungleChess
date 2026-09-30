@@ -10,6 +10,95 @@ from jungle_chess import COLS, DEN, RIVER, ROWS, TRAPS, Game
 BOARD_CELLS = COLS * ROWS
 ACTION_COUNT = BOARD_CELLS * BOARD_CELLS
 OBSERVATION_PLANES = 21
+ACTION_ENCODING = "player-relative-v1"
+
+
+def validate_model_encoding(model) -> None:
+    if getattr(model, "jungle_action_encoding", None) != ACTION_ENCODING:
+        raise ValueError(
+            "Incompatible Jungle Chess action encoding. Retrain with train_rl.py; "
+            "legacy checkpoints (including experiment_10k) use absolute actions."
+        )
+
+
+def _to_agent_view(col: int, row: int, player: int) -> tuple[int, int]:
+    if player == 1:
+        return col, row
+    return COLS - 1 - col, ROWS - 1 - row
+
+
+def encode_observation(game: Game, player: int) -> np.ndarray:
+    """Encode a game from the chosen player's canonical point of view."""
+    if player not in (1, 2):
+        raise ValueError("player must be 1 or 2")
+
+    observation = np.zeros((OBSERVATION_PLANES, ROWS, COLS), dtype=np.int8)
+    for piece in game.pieces:
+        col, row = _to_agent_view(piece.col, piece.row, player)
+        side = 0 if piece.player == player else 1
+        observation[side * 8 + piece.rank - 1, row, col] = 1
+
+    opponent = 2 if player == 1 else 1
+    _mark_cells(observation[16], (DEN[player],), player)
+    _mark_cells(observation[17], (DEN[opponent],), player)
+    _mark_cells(observation[18], RIVER, player)
+    _mark_cells(observation[19], TRAPS[player], player)
+    _mark_cells(observation[20], TRAPS[opponent], player)
+    return observation
+
+
+def _mark_cells(plane: np.ndarray, cells, player: int) -> None:
+    for col, row in cells:
+        view_col, view_row = _to_agent_view(col, row, player)
+        plane[view_row, view_col] = 1
+
+
+def legal_action_mask(game: Game, player: int) -> np.ndarray:
+    """Build a MaskablePPO action mask for a player's current turn."""
+    mask = np.zeros(ACTION_COUNT, dtype=np.bool_)
+    if game.winner is not None or game.turn != player:
+        return mask
+
+    for piece, (nc, nr, _captured) in game.all_moves(player):
+        mask[encode_action((piece.col, piece.row, nc, nr), player)] = True
+    return mask
+
+
+def encode_action(move: tuple[int, int, int, int], player: int = 1) -> int:
+    """Encode a board move in the chosen player's coordinate system."""
+    from_col, from_row = _to_agent_view(move[0], move[1], player)
+    to_col, to_row = _to_agent_view(move[2], move[3], player)
+    return (from_col * ROWS + from_row) * BOARD_CELLS + to_col * ROWS + to_row
+
+
+def decode_action(action: int, player: int = 1) -> tuple[int, int, int, int]:
+    """Decode a player-relative action back to absolute board coordinates."""
+    if not 0 <= action < ACTION_COUNT:
+        raise ValueError("action is outside the action space")
+    from_idx, to_idx = divmod(action, BOARD_CELLS)
+    from_col, from_row = divmod(from_idx, ROWS)
+    to_col, to_row = divmod(to_idx, ROWS)
+    from_col, from_row = _to_agent_view(from_col, from_row, player)
+    to_col, to_row = _to_agent_view(to_col, to_row, player)
+    return from_col, from_row, to_col, to_row
+
+
+def predict_rl_move(game: Game, player: int, model) -> tuple[int, int, int, int]:
+    """Predict and validate a legal move using a trained masked policy."""
+    validate_model_encoding(model)
+    mask = legal_action_mask(game, player)
+    if not mask.any():
+        raise RuntimeError("No legal actions are available for the PPO player")
+
+    action, _state = model.predict(
+        encode_observation(game, player),
+        action_masks=mask,
+        deterministic=True,
+    )
+    action = int(action)
+    if not 0 <= action < ACTION_COUNT or not mask[action]:
+        raise RuntimeError("PPO predicted an illegal action despite the mask")
+    return decode_action(action, player)
 
 
 class JungleChessEnv(gym.Env):
@@ -17,7 +106,8 @@ class JungleChessEnv(gym.Env):
 
     Each environment step contains one learner move and, when the game is
     ongoing, one opponent reply. Opponent policies receive the current Game
-    and return an action encoded as ``from_idx * 63 + to_idx``.
+    and return an absolute-board action encoded as ``from_idx * 63 + to_idx``.
+    Learner actions instead use the same player-relative view as observations.
     """
 
     metadata = {"render_modes": ["human"]}
@@ -80,7 +170,7 @@ class JungleChessEnv(gym.Env):
                 "invalid_action": True,
             }
 
-        self._apply_action(self.agent_player, int(action))
+        self._apply_action(self.agent_player, int(action), canonical=True)
         if self.game.winner is None:
             self._play_opponent_turn()
 
@@ -103,32 +193,24 @@ class JungleChessEnv(gym.Env):
 
     def action_masks(self) -> np.ndarray:
         """Return a boolean mask compatible with sb3-contrib MaskablePPO."""
-        mask = np.zeros(ACTION_COUNT, dtype=np.bool_)
         if (
             self.game is None
             or self.agent_player is None
-            or self.game.winner is not None
-            or self.game.turn != self.agent_player
         ):
-            return mask
-
-        for piece, (nc, nr, _captured) in self.game.all_moves(self.agent_player):
-            from_idx = piece.col * ROWS + piece.row
-            to_idx = nc * ROWS + nr
-            mask[from_idx * BOARD_CELLS + to_idx] = True
-        return mask
+            return np.zeros(ACTION_COUNT, dtype=np.bool_)
+        return legal_action_mask(self.game, self.agent_player)
 
     def render(self):
         if self.render_mode == "human" and self.game is not None:
             self.game.display()
 
-    def _apply_action(self, player: int, action: int) -> bool:
+    def _apply_action(self, player: int, action: int, *, canonical: bool = False) -> bool:
         if self.game is None or self.game.turn != player:
             return False
 
-        from_idx, to_idx = divmod(action, BOARD_CELLS)
-        from_col, from_row = divmod(from_idx, ROWS)
-        to_col, to_row = divmod(to_idx, ROWS)
+        from_col, from_row, to_col, to_row = decode_action(
+            action, player if canonical else 1
+        )
         piece = self.game.piece_at(from_col, from_row)
         if piece is None or piece.player != player:
             return False
@@ -161,31 +243,6 @@ class JungleChessEnv(gym.Env):
             raise ValueError("opponent_policy returned an illegal action")
 
     def _observation(self) -> np.ndarray:
-        observation = np.zeros(
-            (OBSERVATION_PLANES, ROWS, COLS), dtype=np.int8
-        )
         if self.game is None or self.agent_player is None:
-            return observation
-
-        for piece in self.game.pieces:
-            col, row = self._to_agent_view(piece.col, piece.row)
-            side = 0 if piece.player == self.agent_player else 1
-            observation[side * 8 + piece.rank - 1, row, col] = 1
-
-        opponent = 2 if self.agent_player == 1 else 1
-        self._mark_cells(observation[16], (DEN[self.agent_player],))
-        self._mark_cells(observation[17], (DEN[opponent],))
-        self._mark_cells(observation[18], RIVER)
-        self._mark_cells(observation[19], TRAPS[self.agent_player])
-        self._mark_cells(observation[20], TRAPS[opponent])
-        return observation
-
-    def _mark_cells(self, plane: np.ndarray, cells):
-        for col, row in cells:
-            view_col, view_row = self._to_agent_view(col, row)
-            plane[view_row, view_col] = 1
-
-    def _to_agent_view(self, col: int, row: int) -> tuple[int, int]:
-        if self.agent_player == 1:
-            return col, row
-        return COLS - 1 - col, ROWS - 1 - row
+            return np.zeros((OBSERVATION_PLANES, ROWS, COLS), dtype=np.int8)
+        return encode_observation(self.game, self.agent_player)

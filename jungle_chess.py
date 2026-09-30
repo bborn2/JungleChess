@@ -476,14 +476,41 @@ def main():
         game = Game()
 
     print("  模式: [1] 双人对战  [2] 人 vs AI  [3] AI vs 人")
+    print("         [4] 人 vs PPO 模型")
     mode = input("  选择模式 (默认1): ").strip() or "1"
     ai_player = None
+    ppo_model = None
+    ppo_predict_move = None
     if mode == "2":
         ai_player = 2
         print("  你执红方，AI 执蓝方")
     elif mode == "3":
         ai_player = 1
         print("  AI 执红方，你执蓝方")
+    elif mode == "4":
+        human_player = input("  选择你的方位 [1] 红方 [2] 蓝方 (默认1): ").strip() or "1"
+        while human_player not in ("1", "2"):
+            human_player = input("  请输入 1 或 2: ").strip()
+        ai_player = 3 - int(human_player)
+        model_path = (
+            input("  PPO 模型路径 (默认 models/canonical_10k/best/best_model): ").strip()
+            or "models/canonical_10k/best/best_model"
+        )
+        try:
+            from sb3_contrib import MaskablePPO
+            from jungle_rl_env import predict_rl_move, validate_model_encoding
+
+            ppo_model = MaskablePPO.load(model_path, device="cpu")
+            validate_model_encoding(ppo_model)
+            ppo_predict_move = predict_rl_move
+            print(f"  已加载 PPO 模型: {model_path}")
+        except Exception as exc:
+            print(f"  无法加载 PPO 模型: {exc}")
+            return
+        print(
+            f"  你执{'红' if human_player == '1' else '蓝'}方，"
+            f"PPO 执{'蓝' if human_player == '1' else '红'}方"
+        )
     print("  输入格式：列 行  (例如: 3 4)，输入 q 退出")
     print("=" * 40)
 
@@ -501,11 +528,15 @@ def main():
 
         # ── AI turn ──
         if player == ai_player:
-            print("  AI 思考中…")
-            pc, pr, nc, nr = ai_best_move(game)
+            print("  PPO 思考中…" if ppo_model is not None else "  AI 思考中…")
+            if ppo_model is not None:
+                pc, pr, nc, nr = ppo_predict_move(game, player, ppo_model)
+            else:
+                pc, pr, nc, nr = ai_best_move(game)
             piece    = game.piece_at(pc, pr)
             captured = game.piece_at(nc, nr)
-            print(f"  AI 走: {piece} ({pc},{pr}) → ({nc},{nr})"
+            label = "PPO" if ppo_model is not None else "AI"
+            print(f"  {label} 走: {piece} ({pc},{pr}) → ({nc},{nr})"
                   + (f"  吃{captured}" if captured else ""))
             game.apply_move(piece, nc, nr, captured)
             continue

@@ -182,9 +182,10 @@ class Game:
 
 
 # ── MCTS AI ───────────────────────────────────────────────────────────────────
+# This is search-based AI, not a trained reinforcement-learning policy.
 
 # Fast board: board[col*9+row] = (player, rank) or None
-# piece_locs[player] = set of board indices for that player's pieces
+# piece_locs[player] = list of board indices for that player's pieces
 
 _RIVER_SET = frozenset(c * 9 + r for c in (1, 2, 4, 5) for r in (3, 4, 5))
 _DEN_IDX = {1: 3 * 9 + 8, 2: 3 * 9 + 0}
@@ -206,7 +207,11 @@ def _fast_from_game(game):
 
 
 def _fast_moves(board, locs, turn):
-    """Get moves for current player. Returns list of (from_idx, to_idx)."""
+    """Get legal moves for the current player in the compact search state.
+
+    Keep these rules consistent with Game.get_moves(). Moves are
+    (from_idx, to_idx) pairs using col * 9 + row indices.
+    """
     moves = []
     enemy = 2 if turn == 1 else 1
     own_den = _DEN_IDX[turn]
@@ -267,7 +272,10 @@ def _fast_moves(board, locs, turn):
 
 
 def _fast_simulate(board, locs, turn):
-    """Fast playout with heuristics. Returns winner (1/2) or 0."""
+    """Run a heuristic rollout; return winner (1/2), or 0 for a draw.
+
+    Rollout choices are not learned from game data.
+    """
     _choice = random.choice
     for step in range(200):
         moves = _fast_moves(board, locs, turn)
@@ -277,7 +285,7 @@ def _fast_simulate(board, locs, turn):
 
         enemy_den = _DEN_IDX[enemy]
 
-        # Pick move with simple heuristics (no enemy threat calc for speed)
+        # Prefer immediate wins and captures; skip threat analysis for speed.
         best_move = None
         best_score = -1
 
@@ -330,7 +338,7 @@ class MCTSNode:
         self.locs = locs
         self.turn = turn
         self.winner = winner
-        self.move = move  # (piece_idx_in_game, nc, nr) for translating back
+        self.move = move  # (from_idx, to_idx) in the compact board representation
         self.parent = parent
         self.children = []
         self.wins = 0.0

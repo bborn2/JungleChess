@@ -74,6 +74,36 @@ uv run python train_selfplay.py --timesteps 200000 --selfplay-update-freq 25000 
 
 自我对弈比对随机对手训练更具挑战性，适合在基础训练后进一步提升策略强度。
 
+### 对 MCTS 训练（推荐）
+
+直接对会下棋的 MCTS 对手训练，学习真正的进攻防守策略：
+
+```bash
+uv run python train_vs_mcts.py --timesteps 200000 --mcts-time-limit 0.1 --device cpu --output models/mcts_trained/jungle_ppo
+```
+
+MCTS 每步会思考指定时间（默认 0.1 秒），训练速度比对随机对手慢，但能学到更强的策略。
+
+### 课程学习训练（推荐 - 快速版）
+
+使用课程学习逐步提升 MCTS 难度，并通过多环境并行加速训练：
+
+```bash
+uv run python train_curriculum_fast.py --timesteps 200000 --device cpu --n-envs 4
+```
+
+特性：
+- **渐进式难度**：MCTS 从 0.02 秒 → 0.04 秒 → 0.06 秒，避免初期挫败
+- **并行训练**：4 个环境同时训练，接近 4 倍速度（需要多核 CPU）
+- **自动调节**：在 60k 和 120k 步自动提升对手强度
+
+自定义难度曲线：
+```bash
+uv run python train_curriculum_fast.py --curriculum "0:0.03,80000:0.06,150000:0.1" --n-envs 8
+```
+
+这是在有限时间内训练强策略的最佳选择。
+
 ### 评估
 
 独立评估脚本从红方开始交替执方，偶数局数保证双方各占一半，奇数局数红方多一盘。输出包括总成绩、红蓝方各自的局数、胜负平、胜率、平均回合数、吃子数和吃子比率。训练过程中的评估回调仍使用环境随机选边，不替代这项分色评估。

@@ -3,3 +3,5 @@ __pycache__
 *.pthmodels/*.pt
 __pycache__/
 .python-version
+.DS_Store
+models/*/snapshots/

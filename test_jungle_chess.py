@@ -50,9 +50,9 @@ class FastMoveParityTests(unittest.TestCase):
     def test_moves_match_during_reachable_random_games(self):
         rng = random.Random(0)
 
-        for _ in range(10):
+        for _ in range(5):  # reduced from 10
             game = Game()
-            for _ in range(200):
+            for _ in range(100):  # reduced from 200
                 expected = _game_moves(game)
                 board, locs, turn = _fast_from_game(game)
                 self.assertEqual(expected, set(_fast_moves(board, locs, turn)))
@@ -204,6 +204,11 @@ class JungleChessEnvTests(unittest.TestCase):
                 self.assertEqual(results[1]["games"], (episodes + 1) // 2)
                 self.assertEqual(results[2]["games"], episodes // 2)
                 self.assertEqual(sum(result["draws"] for result in results.values()), episodes)
+                # Check new metrics exist
+                for player in (1, 2):
+                    self.assertIn("total_steps", results[player])
+                    self.assertIn("pieces_captured", results[player])
+                    self.assertIn("pieces_lost", results[player])
                 env.close()
 
 

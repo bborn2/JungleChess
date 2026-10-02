@@ -17,7 +17,7 @@ def validate_model_encoding(model) -> None:
     if getattr(model, "jungle_action_encoding", None) != ACTION_ENCODING:
         raise ValueError(
             "Incompatible Jungle Chess action encoding. Retrain with train_rl.py; "
-            "legacy checkpoints (including experiment_10k) use absolute actions."
+            "legacy checkpoints use absolute actions."
         )
 
 

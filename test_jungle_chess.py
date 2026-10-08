@@ -1,7 +1,7 @@
 import random
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 
@@ -210,6 +210,55 @@ class JungleChessEnvTests(unittest.TestCase):
                     self.assertIn("pieces_captured", results[player])
                     self.assertIn("pieces_lost", results[player])
                 env.close()
+
+
+class CurriculumTrainingTests(unittest.TestCase):
+    def test_total_steps_select_latest_stage_without_reverting(self):
+        from train_curriculum_fast import CurriculumMCTSCallback
+
+        env = Mock()
+        callback = CurriculumMCTSCallback([(0, 0.03), (80000, 0.06), (150000, 0.1)])
+        callback.model = SimpleNamespace(get_env=lambda: env)
+        callback.n_calls = 10000
+        for steps, expected in ((79992, 0.03), (80000, 0.06), (80008, 0.06), (150000, 0.1), (150008, 0.1)):
+            callback.num_timesteps = steps
+            callback._on_step()
+            self.assertEqual(callback.current_time_limit, expected)
+        self.assertEqual(env.env_method.call_count, 2)
+        env.env_method.assert_any_call("set_mcts_time_limit", 0.06)
+        env.env_method.assert_any_call("set_mcts_time_limit", 0.1)
+        env.env_method.side_effect = RuntimeError("worker failure")
+        callback.current_time_limit = 0.03
+        with self.assertRaisesRegex(RuntimeError, "worker failure"):
+            callback._on_step()
+
+    def test_curriculum_validation(self):
+        from train_curriculum_fast import parse_curriculum
+
+        self.assertEqual(parse_curriculum("8:0.02,0:0.01"), [(0, 0.01), (8, 0.02)])
+        for schedule in ("", "1:0.02", "0:0", "0:nan", "0:inf", "0:0.02,0:0.03", "0:0.03,8:0.01"):
+            with self.subTest(schedule=schedule), self.assertRaises(ValueError):
+                parse_curriculum(schedule)
+
+    def test_live_subprocess_opponents_are_updated(self):
+        from stable_baselines3.common.vec_env import SubprocVecEnv
+        from train_curriculum_fast import CurriculumMCTSCallback, make_env
+
+        env = SubprocVecEnv([make_env(0.001, 7), make_env(0.001, 7)], start_method="spawn")
+        try:
+            callback = CurriculumMCTSCallback([(0, 0.001), (8, 0.002)])
+            callback.model = SimpleNamespace(get_env=lambda: env)
+            callback.num_timesteps = 8
+            callback.n_calls = 4
+            callback._on_step()
+            self.assertEqual(env.get_attr("mcts_time_limit"), [0.002, 0.002])
+            self.assertEqual(env.get_attr("max_episode_steps"), [7, 7])
+            env.reset()
+            masks = env.env_method("action_masks")
+            env.step([int(np.flatnonzero(mask)[0]) for mask in masks])
+            self.assertEqual(env.get_attr("mcts_time_limit"), [0.002, 0.002])
+        finally:
+            env.close()
 
 
 if __name__ == '__main__':
